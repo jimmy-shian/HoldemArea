@@ -1,5 +1,52 @@
-import { Player, GameState, GameStage } from '../types';
-import { INITIAL_CHIPS, BIG_BLIND, PLAYER_COUNT } from '../constants';
+// Self-contained table state module for Vercel serverless functions.
+// We intentionally avoid importing from the frontend TypeScript files
+// to reduce the chance of build/runtime issues in the serverless
+// environment.
+
+// These values mirror `constants.ts` but are duplicated here so that
+// the backend does not depend on the Vite/TS build pipeline.
+export const INITIAL_CHIPS = 10000;
+export const BIG_BLIND = 100;
+export const PLAYER_COUNT = 4;
+
+// Minimal runtime shapes that match the frontend expectations.
+// We only declare what we actually need on the server side.
+
+export type GameStage =
+  | 'IDLE'
+  | 'PREFLOP'
+  | 'FLOP'
+  | 'TURN'
+  | 'RIVER'
+  | 'SHOWDOWN';
+
+export interface GameState {
+  stage: GameStage;
+  pot: number;
+  communityCards: any[]; // Cards are opaque on the backend for now
+  deckSeed: number;
+  currentTurnIndex: number;
+  dealerIndex: number;
+  highestBet: number;
+  minRaise: number;
+  winners: number[];
+  roundNumber: number;
+}
+
+export interface Player {
+  id: number;
+  name: string;
+  isHuman: boolean;
+  chips: number;
+  bet: number;
+  totalHandBet: number;
+  cards: any[];
+  hasFolded: boolean;
+  isDealer: boolean;
+  isActive: boolean;
+  actionText?: string;
+  lastAction?: 'check' | 'call' | 'raise' | 'fold' | 'allin';
+}
 
 export interface TableState {
   id: string;
@@ -28,7 +75,7 @@ function createInitialPlayers(): Player[] {
 
 function createInitialGameState(): GameState {
   return {
-    stage: GameStage.IDLE,
+    stage: 'IDLE',
     pot: 0,
     communityCards: [],
     deckSeed: Date.now(),

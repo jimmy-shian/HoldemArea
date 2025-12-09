@@ -1,5 +1,4 @@
-import { PLAYER_COUNT } from '../constants';
-import { joinSeat } from './_tableState';
+import { PLAYER_COUNT, joinSeat } from './_tableState';
 
 export default function handler(req: any, res: any) {
   if (req.method !== 'POST') {
