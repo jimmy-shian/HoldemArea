@@ -1,11 +1,21 @@
 import { getPublicState } from './_tableState';
 
-export default function handler(req: any, res: any) {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
-    res.status(405).json({ message: 'Method not allowed' });
-    return;
+    return new Response(
+      JSON.stringify({ message: 'Method not allowed' }),
+      { status: 405, headers: { 'content-type': 'application/json' } },
+    );
   }
 
   const state = getPublicState();
-  res.status(200).json(state);
+
+  return new Response(JSON.stringify(state), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }

@@ -1,18 +1,37 @@
 import { leaveSeat } from './_tableState';
 
-export default function handler(req: any, res: any) {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    res.status(405).json({ success: false });
-    return;
+    return new Response(
+      JSON.stringify({ success: false }),
+      { status: 405, headers: { 'content-type': 'application/json' } },
+    );
   }
 
-  const { playerId } = req.body || {};
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+
+  const { playerId } = body;
 
   if (typeof playerId !== 'number') {
-    res.status(400).json({ success: false });
-    return;
+    return new Response(
+      JSON.stringify({ success: false }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    );
   }
 
   const ok = leaveSeat(playerId);
-  res.status(200).json({ success: ok });
+
+  return new Response(
+    JSON.stringify({ success: ok }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
 }

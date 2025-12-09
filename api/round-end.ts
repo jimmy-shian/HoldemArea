@@ -1,17 +1,32 @@
 import { updateFromClient, getPublicState } from './_tableState';
 
-export default function handler(req: any, res: any) {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    res.status(405).json({ message: 'Method not allowed' });
-    return;
+    return new Response(
+      JSON.stringify({ message: 'Method not allowed' }),
+      { status: 405, headers: { 'content-type': 'application/json' } },
+    );
   }
 
-  const body = req.body || {};
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
 
   if (body.gameState && body.players) {
     updateFromClient(body.gameState, body.players);
   }
 
   const state = getPublicState();
-  res.status(200).json(state);
+
+  return new Response(JSON.stringify(state), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }

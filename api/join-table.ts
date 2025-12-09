@@ -1,29 +1,51 @@
 import { PLAYER_COUNT, joinSeat } from './_tableState';
 
-export default function handler(req: any, res: any) {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    res.status(405).json({ success: false, message: 'Method not allowed' });
-    return;
+    return new Response(
+      JSON.stringify({ success: false, message: 'Method not allowed' }),
+      { status: 405, headers: { 'content-type': 'application/json' } },
+    );
   }
 
-  const { seatIndex, playerName } = req.body || {};
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+
+  const { seatIndex, playerName } = body;
 
   if (typeof seatIndex !== 'number' || typeof playerName !== 'string') {
-    res.status(400).json({ success: false, message: 'Invalid payload' });
-    return;
+    return new Response(
+      JSON.stringify({ success: false, message: 'Invalid payload' }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    );
   }
 
   if (seatIndex < 0 || seatIndex >= PLAYER_COUNT) {
-    res.status(400).json({ success: false, message: 'Invalid seatIndex' });
-    return;
+    return new Response(
+      JSON.stringify({ success: false, message: 'Invalid seatIndex' }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    );
   }
 
   const player = joinSeat(seatIndex, playerName);
 
   if (!player) {
-    res.status(500).json({ success: false, message: 'Unable to join seat' });
-    return;
+    return new Response(
+      JSON.stringify({ success: false, message: 'Unable to join seat' }),
+      { status: 500, headers: { 'content-type': 'application/json' } },
+    );
   }
 
-  res.status(200).json({ success: true, player });
+  return new Response(
+    JSON.stringify({ success: true, player }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
 }

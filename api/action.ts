@@ -1,18 +1,33 @@
 import { getPublicState } from './_tableState';
 
-export default function handler(req: any, res: any) {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    res.status(405).json({ message: 'Method not allowed' });
-    return;
+    return new Response(
+      JSON.stringify({ message: 'Method not allowed' }),
+      {
+        status: 405,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
   }
 
-  // For now we just log the action and return the current shared state.
-  // The front-end still runs the main game logic locally.
-  // Later this can be extended so the server becomes the source of truth.
-  const payload = req.body || {};
-  // eslint-disable-next-line no-console
+  let payload: any = null;
+  try {
+    payload = await req.json();
+  } catch {
+    payload = null;
+  }
+
   console.log('[API] action received:', payload);
 
   const state = getPublicState();
-  res.status(200).json(state);
+
+  return new Response(JSON.stringify(state), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }
