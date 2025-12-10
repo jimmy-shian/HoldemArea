@@ -1,4 +1,5 @@
 import { updateFromClient, getPublicState } from './_tableState';
+import { broadcastState } from './_sse';
 
 export const config = {
   runtime: 'edge',
@@ -24,6 +25,9 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const state = getPublicState();
+
+  // Broadcast to SSE clients for real-time sync.
+  broadcastState(state);
 
   return new Response(JSON.stringify(state), {
     status: 200,

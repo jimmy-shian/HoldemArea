@@ -80,6 +80,7 @@ const App: React.FC = () => {
   const gameLoopRef = useRef<boolean>(false);
   const tableRef = useRef<HTMLDivElement>(null);
   const latestStateRef = useRef<{ gameState: GameState; players: Player[] }>({ gameState, players });
+  const sseRef = useRef<EventSource | null>(null);
 
   // --- Effects ---
 
@@ -105,63 +106,79 @@ const App: React.FC = () => {
   }, [gameMode]);
 
   useEffect(() => {
-    // In MULTIPLAYER, periodically sync from the shared backend state.
-    if (gameMode !== GameMode.MULTIPLAYER) return;
+    // In MULTIPLAYER, prefer SSE push; fall back to low-frequency fetch if needed.
+    if (gameMode !== GameMode.MULTIPLAYER) {
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+      return;
+    }
 
     let cancelled = false;
-    let intervalId: number | undefined;
+    let fallbackInterval: number | undefined;
 
-    const startPolling = async () => {
-      // Initial fetch to align with the current shared table state.
+    const connectSSE = () => {
+      const es = new EventSource('/api/sse');
+      sseRef.current = es;
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (!data) return;
+          setGameState(data.gameState);
+          setPlayers(data.players);
+        } catch {
+          // ignore malformed packet
+        }
+      };
+
+      es.onerror = () => {
+        es.close();
+        sseRef.current = null;
+      };
+    };
+
+    const initialFetch = async () => {
       try {
         const initial = await fetchGameState('table-1');
         if (!initial || cancelled) return;
-
         setGameState(initial.gameState);
         setPlayers(initial.players);
-
-        // If there is no active hand yet, let the first multiplayer client
-        // start one. gameLoopRef prevents repeated triggers.
-        if (
-          initial.gameState.stage === GameStage.IDLE &&
-          !gameLoopRef.current
-        ) {
+        if (initial.gameState.stage === GameStage.IDLE && !gameLoopRef.current) {
           setTimeout(startNewHand, 500);
           gameLoopRef.current = true;
         }
-      } catch (e) {
-        // ignore network errors here; polling will retry shortly
+      } catch {
+        // ignore
       }
-
-      intervalId = window.setInterval(async () => {
-        try {
-          const data = await fetchGameState('table-1');
-          if (!data || cancelled) return;
-
-          setGameState(prev => {
-            // Avoid unnecessary re-renders when nothing important changed.
-            if (
-              prev.roundNumber === data.gameState.roundNumber &&
-              prev.stage === data.gameState.stage &&
-              prev.pot === data.gameState.pot
-            ) {
-              return prev;
-            }
-            return data.gameState;
-          });
-          setPlayers(data.players);
-        } catch (e) {
-          // swallow errors; next tick will retry
-        }
-      }, 1000);
     };
 
-    startPolling();
+    initialFetch();
+    connectSSE();
+
+    // Low-frequency fallback fetch in case SSE drops silently.
+    fallbackInterval = window.setInterval(async () => {
+      if (cancelled) return;
+      if (sseRef.current && sseRef.current.readyState === EventSource.OPEN) {
+        return;
+      }
+      try {
+        const data = await fetchGameState('table-1');
+        if (!data) return;
+        setGameState(data.gameState);
+        setPlayers(data.players);
+      } catch {
+        // ignore
+      }
+    }, 5000);
 
     return () => {
       cancelled = true;
-      if (intervalId) {
-        clearInterval(intervalId);
+      if (fallbackInterval) clearInterval(fallbackInterval);
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
       }
     };
   }, [gameMode]);
