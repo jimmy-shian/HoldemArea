@@ -1,4 +1,5 @@
-import { PLAYER_COUNT, joinSeat } from './_tableState';
+import { PLAYER_COUNT, joinSeat, getPublicState } from './_tableState';
+import { broadcastState } from './_sse';
 
 export const config = {
   runtime: 'edge',
@@ -43,6 +44,10 @@ export default async function handler(req: Request): Promise<Response> {
       { status: 500, headers: { 'content-type': 'application/json' } },
     );
   }
+
+  // Broadcast updated table state so all clients see the new player.
+  const state = getPublicState();
+  broadcastState(state);
 
   return new Response(
     JSON.stringify({ success: true, player }),

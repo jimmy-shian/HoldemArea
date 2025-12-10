@@ -1,4 +1,5 @@
-import { leaveSeat } from './_tableState';
+import { leaveSeat, getPublicState } from './_tableState';
+import { broadcastState } from './_sse';
 
 export const config = {
   runtime: 'edge',
@@ -29,6 +30,9 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const ok = leaveSeat(playerId);
+
+  const state = getPublicState();
+  broadcastState(state);
 
   return new Response(
     JSON.stringify({ success: ok }),

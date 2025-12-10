@@ -232,37 +232,26 @@ const App: React.FC = () => {
   };
 
   const handleJoinQueue = (seatIndex: number, name: string) => {
-      // API call logging
-      joinTable({ tableId: 'table-1', seatIndex, playerName: name });
-
       setPendingPlayerName({ name, seat: seatIndex });
-      
+
       if (gameMode === GameMode.SINGLEPLAYER) {
+        // Singleplayer: 等下一局 startNewHand 時再正式入座
         setNotification(`歡迎 ${name}! 請等待下一局開始...`);
-        // Singleplayer logic waits for next hand in startNewHand
-      } else {
-        // Multiplayer Hot Swap: Join immediately
-        setPlayers(prev => prev.map(p => {
-             if (p.id === seatIndex) {
-                 // Take over the bot
-                 return { ...p, name: name, isHuman: true }; 
-             }
-             return p;
-        }));
-        setPendingPlayerName(null);
-        setNotification(`${name} 加入遊戲 (Joined Game)`);
-        // Sync updated seating to backend so other clients see the joined player.
-        const { gameState: gs, players: ps } = latestStateRef.current;
-        if (gameMode === GameMode.MULTIPLAYER) {
-          void sendRoundEnd({
-            tableId: 'table-1',
-            roundNumber: gs.roundNumber,
-            gameState: gs,
-            players: ps.map(p => (p.id === seatIndex ? { ...p, name, isHuman: true } : p)),
-            winners: gs.winners,
-          });
-        }
+        // 不需要打後端 join-table
+        return;
       }
+
+      // MULTIPLAYER: 由後端 join-table 決定入座，並透過 SSE 同步給所有人
+      (async () => {
+        const res = await joinTable({ tableId: 'table-1', seatIndex, playerName: name });
+        if (!res.success) {
+          setNotification(res.message || '無法加入該座位 (Join failed)');
+          return;
+        }
+        // 本機狀態交給 SSE 推播來更新，這裡只顯示提示文字
+        setNotification(`${name} 加入遊戲 (Joined Game)`);
+        setPendingPlayerName(null);
+      })();
   };
 
   const handleRecoverySubmit = (e: React.FormEvent) => {
