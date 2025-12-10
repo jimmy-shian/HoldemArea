@@ -3,7 +3,7 @@ import { Card, GameStage, Player, GameState, HandRank, HandResult, GameMode } fr
 import { INITIAL_CHIPS, SMALL_BLIND, BIG_BLIND, PLAYER_COUNT, ANIMATION_DELAY, RECOVERY_PASSWORD, MAX_ALLIN } from './constants';
 import { createDeck, evaluateHand } from './services/pokerEngine';
 import { playSound } from './services/soundService';
-import { joinTable, sendAction, sendRoundEnd } from './services/api';
+import { joinTable, sendAction, sendRoundEnd, fetchGameState } from './services/api';
 import { PlayerSeat } from './components/PlayerSeat';
 import { CardComponent } from './components/CardComponent';
 import { GameControls } from './components/GameControls';
@@ -79,6 +79,7 @@ const App: React.FC = () => {
   const turnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gameLoopRef = useRef<boolean>(false);
   const tableRef = useRef<HTMLDivElement>(null);
+  const latestStateRef = useRef<{ gameState: GameState; players: Player[] }>({ gameState, players });
 
   // --- Effects ---
 
@@ -91,11 +92,78 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Initial start logic for both modes
+    latestStateRef.current = { gameState, players };
+  }, [gameState, players]);
+
+  useEffect(() => {
+    // In SINGLEPLAYER, auto-start a new hand on first load / mode switch.
+    if (gameMode !== GameMode.SINGLEPLAYER) return;
     if (gameState.stage === GameStage.IDLE && !gameLoopRef.current) {
-         setTimeout(startNewHand, 1000);
-         gameLoopRef.current = true;
+      setTimeout(startNewHand, 1000);
+      gameLoopRef.current = true;
     }
+  }, [gameMode]);
+
+  useEffect(() => {
+    // In MULTIPLAYER, periodically sync from the shared backend state.
+    if (gameMode !== GameMode.MULTIPLAYER) return;
+
+    let cancelled = false;
+    let intervalId: number | undefined;
+
+    const startPolling = async () => {
+      // Initial fetch to align with the current shared table state.
+      try {
+        const initial = await fetchGameState('table-1');
+        if (!initial || cancelled) return;
+
+        setGameState(initial.gameState);
+        setPlayers(initial.players);
+
+        // If there is no active hand yet, let the first multiplayer client
+        // start one. gameLoopRef prevents repeated triggers.
+        if (
+          initial.gameState.stage === GameStage.IDLE &&
+          !gameLoopRef.current
+        ) {
+          setTimeout(startNewHand, 500);
+          gameLoopRef.current = true;
+        }
+      } catch (e) {
+        // ignore network errors here; polling will retry shortly
+      }
+
+      intervalId = window.setInterval(async () => {
+        try {
+          const data = await fetchGameState('table-1');
+          if (!data || cancelled) return;
+
+          setGameState(prev => {
+            // Avoid unnecessary re-renders when nothing important changed.
+            if (
+              prev.roundNumber === data.gameState.roundNumber &&
+              prev.stage === data.gameState.stage &&
+              prev.pot === data.gameState.pot
+            ) {
+              return prev;
+            }
+            return data.gameState;
+          });
+          setPlayers(data.players);
+        } catch (e) {
+          // swallow errors; next tick will retry
+        }
+      }, 1000);
+    };
+
+    startPolling();
+
+    return () => {
+      cancelled = true;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [gameMode]);
 
   // AI Turn Logic
@@ -141,7 +209,9 @@ const App: React.FC = () => {
       }
       
       // Restart game loop shortly
-      setTimeout(startNewHand, 1000);
+      if (mode === GameMode.SINGLEPLAYER) {
+        setTimeout(startNewHand, 1000);
+      }
   };
 
   const handleJoinQueue = (seatIndex: number, name: string) => {
@@ -164,6 +234,17 @@ const App: React.FC = () => {
         }));
         setPendingPlayerName(null);
         setNotification(`${name} 加入遊戲 (Joined Game)`);
+        // Sync updated seating to backend so other clients see the joined player.
+        const { gameState: gs, players: ps } = latestStateRef.current;
+        if (gameMode === GameMode.MULTIPLAYER) {
+          void sendRoundEnd({
+            tableId: 'table-1',
+            roundNumber: gs.roundNumber,
+            gameState: gs,
+            players: ps.map(p => (p.id === seatIndex ? { ...p, name, isHuman: true } : p)),
+            winners: gs.winners,
+          });
+        }
       }
   };
 
@@ -330,6 +411,19 @@ const App: React.FC = () => {
          setTimeout(nextStage, 800);
     } else {
         advanceTurn(playerId);
+    }
+
+    // In MULTIPLAYER, push the latest state snapshot to backend so other
+    // clients polling /api/game-state can stay in sync.
+    if (gameMode === GameMode.MULTIPLAYER) {
+      const { gameState: gs, players: ps } = latestStateRef.current;
+      void sendRoundEnd({
+        tableId: 'table-1',
+        roundNumber: gs.roundNumber,
+        gameState: gs,
+        players: ps,
+        winners: gs.winners,
+      });
     }
   };
 
@@ -547,6 +641,30 @@ const App: React.FC = () => {
 
     playSound('card');
     setTimeout(() => advanceTurn((bbIndex + 1) % PLAYER_COUNT), 500);
+
+    // Sync the freshly dealt hand to backend so that late-joining
+    // multiplayer clients see the same board and stacks.
+    if (gameMode === GameMode.MULTIPLAYER) {
+      const nextState: GameState = {
+        stage: GameStage.PREFLOP,
+        pot,
+        communityCards: [],
+        deckSeed: seed,
+        currentTurnIndex: (bbIndex + 1) % PLAYER_COUNT,
+        dealerIndex: nextDealer,
+        highestBet: BIG_BLIND,
+        minRaise: BIG_BLIND,
+        winners: [],
+        roundNumber: gameState.roundNumber + 1,
+      };
+      void sendRoundEnd({
+        tableId: 'table-1',
+        roundNumber: nextState.roundNumber,
+        gameState: nextState,
+        players: updatedPlayers,
+        winners: [],
+      });
+    }
   };
 
   const botTurn = (player: Player) => {
