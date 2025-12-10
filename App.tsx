@@ -344,9 +344,20 @@ const App: React.FC = () => {
   };
 
   const handleAction = (playerId: number, action: 'check' | 'call' | 'raise' | 'fold' | 'allin', amount: number = 0) => {
-    // API Call Log
-    sendAction({ tableId: 'table-1', playerId, action, amount });
+    // In MULTIPLAYER mode, only send action to backend and wait for response.
+    // Backend is the authoritative source of truth.
+    if (gameMode === GameMode.MULTIPLAYER) {
+      playSound('chip');
+      sendAction({ tableId: 'table-1', playerId, action, amount }).then((response) => {
+        if (response) {
+          setGameState(response.gameState);
+          setPlayers(response.players);
+        }
+      });
+      return;
+    }
 
+    // SINGLEPLAYER: Run game logic locally (original behavior)
     let updatedPlayers = [...players];
     const player = updatedPlayers[playerId];
     let newHighestBet = gameState.highestBet;
@@ -411,19 +422,6 @@ const App: React.FC = () => {
          setTimeout(nextStage, 800);
     } else {
         advanceTurn(playerId);
-    }
-
-    // In MULTIPLAYER, push the latest state snapshot to backend so other
-    // clients polling /api/game-state can stay in sync.
-    if (gameMode === GameMode.MULTIPLAYER) {
-      const { gameState: gs, players: ps } = latestStateRef.current;
-      void sendRoundEnd({
-        tableId: 'table-1',
-        roundNumber: gs.roundNumber,
-        gameState: gs,
-        players: ps,
-        winners: gs.winners,
-      });
     }
   };
 
@@ -547,13 +545,18 @@ const App: React.FC = () => {
   };
 
   const startNewHand = () => {
+    // In MULTIPLAYER mode, don't run local logic. The backend will handle
+    // startNewHand when /api/action is called and gameState is IDLE.
+    if (gameMode === GameMode.MULTIPLAYER) {
+      // Just wait for the backend to send us a new hand via polling.
+      return;
+    }
+
+    // SINGLEPLAYER: Run hand logic locally
     setWinningHandResult(null);
     setNotification('');
     setDeck([]);
     
-    // In MP, bots play automatically, so we don't pause for players.
-    // In SP, we might have paused, but effectively we always run bots now.
-
     // Move Dealer
     const nextDealer = (gameState.dealerIndex + 1) % PLAYER_COUNT;
     const sbIndex = (nextDealer + 1) % PLAYER_COUNT;
@@ -641,34 +644,15 @@ const App: React.FC = () => {
 
     playSound('card');
     setTimeout(() => advanceTurn((bbIndex + 1) % PLAYER_COUNT), 500);
-
-    // Sync the freshly dealt hand to backend so that late-joining
-    // multiplayer clients see the same board and stacks.
-    if (gameMode === GameMode.MULTIPLAYER) {
-      const nextState: GameState = {
-        stage: GameStage.PREFLOP,
-        pot,
-        communityCards: [],
-        deckSeed: seed,
-        currentTurnIndex: (bbIndex + 1) % PLAYER_COUNT,
-        dealerIndex: nextDealer,
-        highestBet: BIG_BLIND,
-        minRaise: BIG_BLIND,
-        winners: [],
-        roundNumber: gameState.roundNumber + 1,
-      };
-      void sendRoundEnd({
-        tableId: 'table-1',
-        roundNumber: nextState.roundNumber,
-        gameState: nextState,
-        players: updatedPlayers,
-        winners: [],
-      });
-    }
   };
 
   const botTurn = (player: Player) => {
-      // Basic AI
+      // In MULTIPLAYER, bots are disabled (only human players).
+      if (gameMode === GameMode.MULTIPLAYER) {
+        return;
+      }
+
+      // SINGLEPLAYER: Basic AI
       const currentBet = player.bet;
       const callAmt = gameState.highestBet - currentBet;
       
